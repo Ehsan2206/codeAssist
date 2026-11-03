@@ -1,0 +1,55 @@
+name: Build Parsi Communicator APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "parsi-communicator-android/source.tar.xz.b64"
+      - ".github/workflows/build-parsi-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify source archive and extract
+        shell: bash
+        run: |
+          mkdir -p android-src
+          base64 -d parsi-communicator-android/source.tar.xz.b64 > /tmp/parsi-source.tar.xz
+          echo "2e56c21f81264b407d5ce288fab84fca44cce4415ccd7da9ff3e1e429f553586  /tmp/parsi-source.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/parsi-source.tar.xz -C android-src
+          test -f android-src/app/src/main/java/com/parsicomm/android/MainActivity.kt
+          test ! -f android-src/keystore.jks
+      - name: Compile real native APK
+        working-directory: android-src
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Verify native app and prepare download
+        working-directory: android-src
+        run: |
+          python3 scripts/verify_native_apk.py app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/parsi-communicator-v2.4.1-crashfix-debug.apk
+          sha256sum dist/parsi-communicator-v2.4.1-crashfix-debug.apk
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: parsi-communicator-v2.4.1-crashfix-apk
+          path: android-src/dist/parsi-communicator-v2.4.1-crashfix-debug.apk
+          if-no-files-found: error
+          retention-days: 14
